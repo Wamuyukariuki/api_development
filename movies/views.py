@@ -1,12 +1,10 @@
+import logging
 import traceback
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.response import Response
 from utils.helper import fetch_from_tmdb, fetch_and_paginate_tmdb_data
 from utils.responses import standard_response
 from .serializers import RecommendationsRequestSerializer, RatingSerializer
-import logging
 
 logger = logging.getLogger(__name__)
 
