@@ -5,20 +5,17 @@ from django.core.cache import cache
 from requests.exceptions import RequestException, HTTPError
 import time
 
+from rest_framework.pagination import PageNumberPagination
+
+from utils.responses import standard_response
+
 # Set up logging
 logger = logging.getLogger(__name__)
+
 
 def fetch_from_tmdb(endpoint, params, cache_key, timeout=600, retries=3, backoff_factor=1.0):
     """
     Fetch data from TMDb API with Redis caching, retry logic, and rate limit handling.
-
-    :param endpoint: API endpoint to query
-    :param params: Query parameters for the API request
-    :param cache_key: Key for caching the response
-    :param timeout: Cache timeout in seconds
-    :param retries: Number of retries in case of failure
-    :param backoff_factor: Factor to multiply the backoff time on each retry
-    :return: JSON data or None on failure
     """
     try:
         # Check cache first
@@ -42,6 +39,7 @@ def fetch_from_tmdb(endpoint, params, cache_key, timeout=600, retries=3, backoff
                     logger.warning(f"Rate limit exceeded. Retrying in {backoff_factor * (2 ** attempt)} seconds...")
                     time.sleep(backoff_factor * (2 ** attempt))  # Exponential backoff
                     continue  # Retry the request
+
                 # Parse and cache the data
                 data = response.json()
                 cache.set(cache_key, data, timeout=timeout)
@@ -60,7 +58,7 @@ def fetch_from_tmdb(endpoint, params, cache_key, timeout=600, retries=3, backoff
                 logger.critical(f"Unexpected error in fetch_from_tmdb: {e}")  # Log unexpected errors
                 break
 
-        # If the retries are exhausted 'or' we hit a fatal error
+        # If the retries are exhausted or we hit a fatal error
         logger.error(f"Failed to fetch data from TMDb after {retries} retries.")
         return None
 
@@ -68,3 +66,23 @@ def fetch_from_tmdb(endpoint, params, cache_key, timeout=600, retries=3, backoff
         # Catch-all for unexpected exceptions at the top level
         logger.critical(f"Unexpected error in fetch_from_tmdb: {e}")
         return None
+
+
+# Helper function to handle TMDb fetching and pagination
+def fetch_and_paginate_tmdb_data(request, endpoint, params, cache_key, page_size=10):
+    try:
+        data = fetch_from_tmdb(endpoint, params, cache_key)
+        if data:
+            paginator = PageNumberPagination()
+            paginator.page_size = page_size
+            result_page = paginator.paginate_queryset(data.get('results', []), request)
+            return paginator.get_paginated_response(
+                [{'title': movie['title'], 'description': movie['overview']} for movie in result_page]
+            )
+        else:
+            logger.error(f"Failed to fetch data for {cache_key}.")
+            return standard_response(errors={"detail": "Failed to fetch data from TMDb"}, status=500,
+                                     message="Error fetching data")
+    except Exception as e:
+        logger.error(f"Error occurred while fetching data: {str(e)}")
+        return standard_response(errors={"detail": "Internal server error"}, status=500, message="Error fetching data")
