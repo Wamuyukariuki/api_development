@@ -1,10 +1,14 @@
 import logging
 import traceback
-from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
-from utils.helper import fetch_from_tmdb, fetch_and_paginate_tmdb_data
-from utils.responses import standard_response
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+
+from movies.utils.helper import fetch_from_tmdb, fetch_and_paginate_tmdb_data
+from movies.utils.responses import standard_response
 from .serializers import RecommendationsRequestSerializer, RatingSerializer
+from rest_framework.exceptions import NotFound
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,7 @@ class GetRecommendationsView(generics.GenericAPIView):
 
         return fetch_and_paginate_tmdb_data(request, 'discover/movie', params, cache_key)
 
+
 class GetMovieDetailsView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
@@ -41,21 +46,31 @@ class GetMovieDetailsView(generics.GenericAPIView):
         cache_key = f"movie_details_{movie_id}"
         params = {'language': request.GET.get('language', 'en')}
 
-        movie_details = fetch_from_tmdb(f"movie/{movie_id}", params, cache_key)
+        try:
+            # Fetch the movie details from TMDB
+            movie_details = fetch_from_tmdb(f"movie/{movie_id}", params, cache_key)
 
-        if movie_details:
+            # Check if the movie details were returned
+            if movie_details is None:
+                logger.error(f"Movie with ID {movie_id} not found.")
+                raise NotFound(detail="Movie not found in TMDb.")
+
+            # Parse the movie details
             data = {
                 'title': movie_details['title'],
                 'description': movie_details['overview'],
                 'release_date': movie_details['release_date'],
                 'rating': movie_details['vote_average']
             }
+
             logger.info(f"Successfully fetched movie details for ID {movie_id}.")
             return standard_response(data=data, status=200, message="Movie details fetched successfully")
-        else:
-            logger.error(f"Failed to fetch details for movie ID {movie_id}.")
-            return standard_response(errors={"detail": "Failed to fetch movie details"}, status=500,
-                                     message="Error fetching movie details")
+        except NotFound as e:
+            return standard_response(errors={"detail": str(e)}, status=404, message="Movie not found")
+        except Exception as e:
+            logger.error(f"Error fetching movie details for ID {movie_id}: {str(e)}")
+            return standard_response(errors={"detail": "Failed to fetch movie details"}, status=500, message="Error fetching movie details")
+
 
 class SubmitRatingView(generics.CreateAPIView):
     serializer_class = RatingSerializer
@@ -81,6 +96,10 @@ class SubmitRatingView(generics.CreateAPIView):
                 logger.error(f"Invalid rating format for movie ID {movie_id}.")
                 raise ValueError("Rating must be a valid number.")
 
+            if not self.request.user.is_authenticated:
+                logger.error("Unauthenticated user attempted to submit a rating.")
+                raise PermissionError("User must be authenticated to submit a rating.")
+
             serializer.save(movie_id=movie_id, rating=rating, user=self.request.user)
             logger.info(f"Successfully saved rating {rating} for movie ID {movie_id} by user {self.request.user.id}.")
 
@@ -88,6 +107,34 @@ class SubmitRatingView(generics.CreateAPIView):
             logger.error(f"Error occurred: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise e
+
+    def create(self, request, *args, **kwargs):
+        try:
+            response = super().create(request, *args, **kwargs)
+            return Response(
+                {
+                    "message": "success",
+                    "data": response.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except ValueError as e:
+            return Response(
+                {"message": f"Validation Error: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except PermissionError as e:
+            return Response(
+                {"message": f"Permission Error: {str(e)}"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return Response(
+                {"message": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class GetTrendingMoviesView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
@@ -97,5 +144,3 @@ class GetTrendingMoviesView(generics.GenericAPIView):
 
         cache_key = "trending_movies"
         params = {'language': request.GET.get('language', 'en')}
-
-        return fetch_and_paginate_tmdb_data(request, 'trending/movie/day', params, cache_key)
