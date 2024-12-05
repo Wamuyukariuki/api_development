@@ -7,7 +7,7 @@ import time
 
 from rest_framework.pagination import PageNumberPagination
 
-from utils.responses import standard_response
+from movies.utils.responses import standard_response
 
 # Set up logging
 logger = logging.getLogger(__name__)
