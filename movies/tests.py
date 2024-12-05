@@ -148,38 +148,41 @@ class GetMovieDetailsViewTest(TestCase):
         self.assertEqual(response.data['errors']['detail'], 'Failed to fetch movie details')
 
 
-class TestSubmitRatingView(TestCase):
+from django.contrib.auth.models import User
+from django.urls import reverse
+from rest_framework.test import APIClient, APITestCase
+from rest_framework import status
+
+class TestSubmitRatingView(APITestCase):
     def setUp(self):
         # Create a test user
         self.user = User.objects.create_user(username='jackson.wamuyu', password='Admin@001')
 
-        # Get the token for the user
+        # Obtain a token for the user
         response = self.client.post('/api/token/', {'username': 'jackson.wamuyu', 'password': 'Admin@001'})
         self.token = response.data['access']
 
         # Set up the URL and data for the rating submission
-        self.url = reverse('submit_rating')  # Ensure this matches the correct URL pattern name
+        self.url = reverse('submit_rating')  # Ensure this matches your URL pattern name
         self.data = {
             'movie_id': 123,
             'rating': 8.5
         }
 
-        # Use APIClient instead of Client
+        # Use APIClient with authentication
         self.api_client = APIClient()
-
-    def test_submit_rating_201(self):
-        # Set the Authorization header with the token
         self.api_client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.token}')
 
+    def test_submit_rating_201(self):
         # Make the POST request with authenticated user
-        response = self.api_client.post(self.url, data=self.data)
+        response = self.api_client.post(self.url, data=self.data, format='json')
 
-        # Debugging: Print the actual response data to inspect it
-        print("Response Data:", response.data)  # This will allow you to see the response content
+        # Debugging: Inspect the response content
+        print("Response Data:", response.data)
 
-        # Assert response status and data
-        self.assertEqual(response.status_code, 201)
+        # Assert that the response status code is 201
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        # Check if the response contains a success message (adjust if necessary)
+        # Assert that the response contains the success message
         self.assertIn('success', response.json().get('message', ''))
 
