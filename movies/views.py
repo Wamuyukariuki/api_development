@@ -1,7 +1,9 @@
 import logging
 import traceback
-from rest_framework import generics
-from rest_framework.permissions import AllowAny
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+
 from movies.utils.helper import fetch_from_tmdb, fetch_and_paginate_tmdb_data
 from movies.utils.responses import standard_response
 from .serializers import RecommendationsRequestSerializer, RatingSerializer
@@ -13,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class GetRecommendationsView(generics.GenericAPIView):
     serializer_class = RecommendationsRequestSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         logger.info("Starting to process recommendation request.")
@@ -36,7 +38,7 @@ class GetRecommendationsView(generics.GenericAPIView):
 
 
 class GetMovieDetailsView(generics.GenericAPIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, movie_id, *args, **kwargs):
         logger.info(f"Fetching details for movie ID: {movie_id}")
@@ -72,7 +74,7 @@ class GetMovieDetailsView(generics.GenericAPIView):
 
 class SubmitRatingView(generics.CreateAPIView):
     serializer_class = RatingSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         logger.info("Starting rating submission process.")
@@ -106,14 +108,39 @@ class SubmitRatingView(generics.CreateAPIView):
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise e
 
+    def create(self, request, *args, **kwargs):
+        try:
+            response = super().create(request, *args, **kwargs)
+            return Response(
+                {
+                    "message": "success",
+                    "data": response.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except ValueError as e:
+            return Response(
+                {"message": f"Validation Error: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except PermissionError as e:
+            return Response(
+                {"message": f"Permission Error: {str(e)}"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return Response(
+                {"message": "An unexpected error occurred. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class GetTrendingMoviesView(generics.GenericAPIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
         logger.info("Fetching trending movies")
 
         cache_key = "trending_movies"
         params = {'language': request.GET.get('language', 'en')}
-
-        return fetch_and_paginate_tmdb_data(request, 'trending/movie/day', params, cache_key)
