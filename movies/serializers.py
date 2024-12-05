@@ -26,31 +26,38 @@ GENRE_ID_TO_NAME = {
 }
 
 
-
 class RatingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rating
         fields = ['movie_id', 'user', 'rating']
         read_only_fields = ['user']  # user will be set automatically
 
-    def validate_rating(self, value):
-        if value < 1 or value > 10:
-            raise serializers.ValidationError("Rating must be between 1 and 10.")
-        return value
+    def validate(self, data):
+        user = self.context['request'].user  # Get the user from the request context
+        movie_id = data['movie_id']
+
+        existing_rating = Rating.objects.filter(movie_id=movie_id, user=user).first()
+        if existing_rating:
+            existing_rating.rating = data['rating']
+            existing_rating.save()
+            raise serializers.ValidationError("Your previous rating has been updated.")
+
+        data['user'] = user  # Set the user automatically
+        return data
+
 
 class RecommendationsRequestSerializer(serializers.Serializer):
     genres = serializers.ListField(
         child=serializers.CharField(),
-        required=False
+        required=True
     )
     language = serializers.CharField(default='en')
     release_year = serializers.IntegerField(default=2023)
 
     def validate_genres(self, value):
-        # Convert genre names to their IDs if valid
         validated_genres = []
         for genre in value:
-            if genre.isdigit():  # Check if the genre is a numeric ID
+            if genre.isdigit():  # If the genre is a numeric ID
                 genre_id = int(genre)
                 if genre_id in GENRE_ID_TO_NAME:
                     validated_genres.append(str(genre_id))
@@ -58,7 +65,7 @@ class RecommendationsRequestSerializer(serializers.Serializer):
                     raise serializers.ValidationError(
                         f"Invalid genre ID: {genre}. Valid genre IDs are {', '.join(map(str, GENRE_ID_TO_NAME.keys()))}."
                     )
-            else:  # Treat as genre name
+            else:  # If the genre is a name
                 genre_id = next((id for id, name in GENRE_ID_TO_NAME.items() if name.lower() == genre.lower()), None)
                 if genre_id:
                     validated_genres.append(str(genre_id))
@@ -74,6 +81,6 @@ class RecommendationsRequestSerializer(serializers.Serializer):
         return value
 
     def validate_release_year(self, value):
-        if value < 1900 or value > 2100:
+        if not (1900 <= value <= 2100):
             raise serializers.ValidationError("Release year must be between 1900 and 2100.")
         return value
